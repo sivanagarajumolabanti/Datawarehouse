@@ -1,0 +1,79 @@
+create schema bi_audit;
+commit;
+
+
+create table if not exists bi_audit.job_master  ( 
+	job_master_id     	serial not null,
+	job_name          	varchar(200) not null,
+	enabled           	char(1) not null,
+	job_type          	varchar(20) null,
+	priority          	int not null,
+	frequency         	varchar(50) not null,
+	job_description   	varchar(1000) not null,
+	downstream_systems	varchar(1000) null,
+	insert_timestamp  	timestamp(0) default current_timestamp not null,
+	update_timestamp  	timestamp(0) default current_timestamp null,
+	misc_info         	varchar(4000) null,
+	constraint pk_job_master_job_master_id primary key(job_master_id),
+	constraint uix_job_master unique (job_name)
+);
+commit
+
+create table if not exists bi_audit.job_dependency_master  ( 
+	job_dependency_id       	serial not null,
+	job_master_id           	integer not null,
+	enabled                 	char(1) not null,
+	dependent_source_name   	varchar(300) not null,
+	data_source             	varchar(50) default ('all') null,
+	dependent_type          	varchar(50) not null,
+	dependent_date_range    	varchar(50) not null,
+	dependent_source_details	varchar(4000) null,
+	insert_timestamp        	timestamp(0) default current_timestamp not null,
+	update_timestamp        	timestamp(0) default current_timestamp null,
+	is_soft_dependency      	char(1) null,
+	soft_dependency_sla     	varchar(20) null
+);
+alter table bi_audit.job_dependency_master add constraint uix_job_dependency_master unique (job_master_id, job_dependency_id, data_source);
+alter table bi_audit.job_dependency_master add constraint pk_job_dependency_master_job_master_id primary key (job_dependency_id);
+alter table bi_audit.job_dependency_master add constraint fk_job_dependency_master_job_master_id foreign key (job_master_id) references bi_audit.job_master (job_master_id) on delete restrict on update cascade;
+commit;
+
+create table if not exists bi_audit.job_log  ( 
+	job_log_id               	serial not null,
+	job_master_id            	int not null,
+	job_name                 	varchar(200) not null,
+	status                   	varchar(20) not null,
+	job_start_timestamp      	timestamp(0) default current_timestamp null,
+	job_end_timestamp        	timestamp(0) null,
+	data_load_start_timestamp	timestamp(0) null,
+	data_load_end_timestamp  	timestamp(0) null,
+	bucket_list              	varchar(1000) null,
+	load_server_name         	varchar(100) not null,
+	is_adhoc_run             	char(1) null,
+	log_file_path            	varchar(1000) null,
+	error_file_path          	varchar(1000) null,
+	misc_info                	varchar(4000) null,
+	constraint pk_job_log_job_log_id primary key(job_log_id),
+	constraint uix_job_log_run unique (job_master_id, job_start_timestamp),
+	constraint check_job_log_status check (status in ('running', 'failed', 'completed')),
+	constraint fk_job_log_job_master_id foreign key (job_master_id) references bi_audit.job_master (job_master_id) 
+);
+commit;
+
+create table if not exists bi_audit.task_log  ( 
+	task_log_id              	serial not null,
+	job_log_id               	int not null,
+	status                   	varchar(20) not null,
+	task_name                	varchar(200) not null,
+	task_start_timestamp     	timestamp(0) default current_timestamp null,
+	task_end_timestamp       	timestamp(0) null,
+	data_load_start_timestamp	timestamp(0) null,
+	data_load_end_timestamp  	timestamp(0) null,
+	bucket_list              	varchar(1000) null,
+	misc_info                	varchar(4000) null,
+	constraint pk_task_log_task_log_id primary key(task_log_id),
+	constraint uix_task_log_run unique (task_log_id, task_start_timestamp),
+	constraint check_task_log_status check (status in ('running', 'failed', 'completed')),
+	constraint fk_task_log_job_log_id foreign key (job_log_id) references bi_audit.job_log (job_log_id) 
+);
+commit;

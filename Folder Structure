@@ -1,0 +1,13 @@
+Folder Structure
+
+Project_name(json_ingest_daily)
+	scripts
+	sql
+	data
+		raw
+		processed
+		archive
+	log
+	py_files (folder for all python files for the project)
+	json_ingest_daily_env (virtual environment)	
+

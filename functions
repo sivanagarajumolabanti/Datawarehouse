@@ -1,0 +1,113 @@
+create or replace function bi_audit.add_job_to_job_master(job_name varchar(200),enabled char(1),job_type varchar(20),priority int,frequency varchar(50),job_description varchar(1000)) returns void
+as $$ 
+  insert into bi_audit.job_master (job_name,enabled,job_type,priority,frequency,job_description) values(job_name,enabled,job_type,priority,frequency,job_description);
+$$ language sql;
+commit;
+
+create or replace function bi_audit.get_job_status(jobname varchar(200) ) returns varchar(20)
+as
+$$
+	select status from bi_audit.job_log where job_log_id = (select max(job_log_id) from bi_audit.job_log where job_name=jobname);
+
+$$ language sql;
+commit;
+
+create or replace function bi_audit.get_last_load_date(jobname varchar(200) ) returns date
+as
+$$
+	select data_load_end_timestamp::date from bi_audit.job_log where job_log_id = (select max(job_log_id) from bi_audit.job_log where job_name=jobname and status='completed');
+
+$$ language sql;
+commit;
+
+
+create or replace function bi_audit.update_job_status(job_id int,job_status varchar(20) ) returns void
+as
+$$
+	update bi_audit.job_log  set status= job_status,job_end_timestamp=now() where job_log_id=job_id;
+$$ language sql;
+commit;
+
+create or replace function bi_audit.create_task_log(job_id int,taskname varchar(200) ) returns integer
+as $body$ 
+declare task_log_id integer;
+begin	
+	insert into bi_audit.task_log (job_log_id,status,task_name,task_start_timestamp) 
+	values(job_id,'running',taskname,now());
+
+	select max(a.task_log_id) into task_log_id from bi_audit.task_log a where task_name=taskname ;
+
+   return task_log_id; 
+end		
+$body$ language plpgsql;
+commit;
+
+create or replace function bi_audit.update_task_status(task_id int,task_status varchar(20) ) returns void
+as
+$$
+	update bi_audit.task_log  set status= task_status,task_end_timestamp=now() where task_log_id=task_id;
+$$ language sql;
+commit;
+
+create or replace function bi_audit.check_dependencies(jobname varchar(20) ) returns table(dependency varchar(20))
+as $body$ 
+begin	
+	return query select
+		distinct dm.dependent_source_name
+	from 
+	bi_audit.job_master jm
+	join bi_audit.job_dependency_master dm on jm.job_master_id=dm.job_master_id
+	left join bi_audit.job_log jl on jl.job_name=dm.dependent_source_name and jl.job_end_timestamp::date= now()::date and jl.status='completed'
+	where 1=1
+	and jm.job_name=jobname
+	and dm.enabled='y'
+	and jl.job_name is null;
+
+end;		
+$body$ language plpgsql;
+commit;
+
+
+create or replace function bi_audit.create_job_log(jobname varchar(200),load_start_date date ) returns integer
+as $body$ 
+declare job_log_id integer;
+begin	
+  if exists (select 1 from bi_audit.job_master where job_name=jobname) then
+		insert into bi_audit.job_log (job_master_id,job_name,status,load_server_name,job_start_timestamp,data_load_start_timestamp,data_load_end_timestamp) 
+		select job_master_id,job_name,'running','prod-server',now(),load_start_date,now()::date from bi_audit.job_master where job_name=jobname;
+		
+		select max(a.job_log_id) into job_log_id from bi_audit.job_log a;
+  else
+   job_log_id:=0;
+  end if;
+   return job_log_id; 
+end		
+$body$ language plpgsql;
+commit;
+
+---- Scripts for populating the tables
+
+select * from bi_audit.job_master;
+select * from bi_audit.job_dependency_master;
+select * from bi_audit.job_log;
+
+commit;
+
+
+select bi_audit.add_job_to_job_master('json_daily_ingest','y','data load',0,'daily','Load json file');
+select bi_audit.add_job_to_job_master('olsm_daily_ingest','y','data load',0,'daily','Load json file');
+select bi_audit.add_job_to_job_master('af_daily_ingest','y','data load',0,'daily','Load json file');
+
+insert into bi_audit.job_dependency_master 
+(job_master_id,enabled,dependent_source_name,dependent_type,dependent_date_range) 
+values(1,'y','af_daily_ingest','data','xyz');
+insert into bi_audit.job_dependency_master 
+(job_master_id,enabled,dependent_source_name,dependent_type,dependent_date_range) 
+values(1,'y','olsm_daily_ingest','data','xyz');
+
+select bi_audit.create_job_log('json_daily_ingest','2018-04-01'::date);
+select bi_audit.create_job_log('olsm_daily_ingest','2018-04-02'::date);
+
+select bi_audit.update_job_status(3,'completed');
+select bi_audit.update_job_status(1,'failed');
+commit;
